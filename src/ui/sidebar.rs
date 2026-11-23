@@ -1,6 +1,6 @@
 use super::{UmuBoxApp, modals};
 use crate::runner::{format_bytes, open_in_file_manager};
-use crate::theme::{hex_alpha, hex_color, kd};
+use crate::theme::{accent_alpha, hex_color, kd};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
@@ -80,7 +80,7 @@ pub fn render_sidebar(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl Into
                 gpui_kit::transparent_black()
             })
             .bg(if is_selected {
-                hex_alpha(0x8ba4b024)
+                accent_alpha(0x24)
             } else {
                 gpui_kit::transparent_black()
             })

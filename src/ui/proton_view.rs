@@ -1,7 +1,7 @@
 use super::UmuBoxApp;
 use crate::proton::{DownloadPhase, ProtonSource, is_release_installed};
 use crate::runner::format_bytes;
-use crate::theme::{hex_alpha, hex_color, kd};
+use crate::theme::{accent_alpha, hex_alpha, hex_color, kd};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
@@ -97,7 +97,7 @@ pub fn render_proton_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                                         .px_1p5()
                                         .py_0p5()
                                         .rounded(px(4.))
-                                        .bg(hex_alpha(0x8ba4b030))
+                                        .bg(accent_alpha(0x30))
                                         .text_size(px(10.5))
                                         .font_weight(FontWeight::BOLD)
                                         .text_color(hex_color(kd::BLUE))
@@ -201,7 +201,7 @@ pub fn render_proton_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
             .p_3()
             .gap_2()
             .rounded(px(8.))
-            .bg(hex_alpha(0x8ba4b01f))
+            .bg(accent_alpha(0x1f))
             .border_1()
             .border_color(hex_color(kd::BLUE))
             .child(
@@ -245,7 +245,7 @@ pub fn render_proton_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
             .w_full()
             .p_3()
             .rounded(px(8.))
-            .bg(hex_alpha(0x87a98722))
+            .bg(hex_alpha(0x59c98c22))
             .border_1()
             .border_color(hex_color(kd::GREEN))
             .items_center()
@@ -322,7 +322,7 @@ pub fn render_proton_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                                         .px_1p5()
                                         .py_0p5()
                                         .rounded(px(4.))
-                                        .bg(hex_alpha(0x87a9872b))
+                                        .bg(hex_alpha(0x59c98c2b))
                                         .text_size(px(10.))
                                         .font_weight(FontWeight::BOLD)
                                         .text_color(hex_color(kd::GREEN))
@@ -401,7 +401,7 @@ pub fn render_proton_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                                 div()
                                     .p_3()
                                     .rounded(px(8.))
-                                    .bg(hex_alpha(0xc4746e26))
+                                    .bg(hex_alpha(0xe06c7526))
                                     .border_1()
                                     .border_color(hex_color(kd::RED))
                                     .text_xs()

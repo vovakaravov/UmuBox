@@ -5,7 +5,7 @@
 <h1 align="center">UmuBox</h1>
 
 <p align="center">
-  Native GPU-accelerated Rust + <a href="https://gpui.rs">GPUI</a> Wine/Proton Prefix &amp; Game Manager powered by <code>umu-run</code> — styled in <strong>Kanagawa Dragon</strong> with zero Electron overhead.
+  Native GPU-accelerated Rust + <a href="https://gpui.rs">GPUI</a> Wine/Proton Prefix &amp; Game Manager powered by <code>umu-run</code> — styled in <strong>Midnight Cobalt</strong> with zero Electron overhead.
 </p>
 
 ---

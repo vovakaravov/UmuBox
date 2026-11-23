@@ -1207,7 +1207,7 @@ impl Render for UmuBoxApp {
                                 .px_2()
                                 .py_0p5()
                                 .rounded(px(4.))
-                                .bg(hex_alpha(0x87a9872b))
+                                .bg(hex_alpha(0x59c98c2b))
                                 .text_xs()
                                 .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .text_color(hex_color(kd::GREEN))

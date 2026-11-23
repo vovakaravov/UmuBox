@@ -83,7 +83,7 @@ pub fn render_prefix_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                                         .py_0p5()
                                         .rounded(px(4.))
                                         .bg(if is_running {
-                                            hex_alpha(0x87a9872b)
+                                            hex_alpha(0x59c98c2b)
                                         } else {
                                             card_bg
                                         })

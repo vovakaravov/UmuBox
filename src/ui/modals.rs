@@ -3,7 +3,7 @@ use crate::config::{GameEntry, LaunchOptions, format_extra_env, parse_extra_env,
 use crate::icons::load_gpui_preview_for_source;
 use crate::proton::ProtonBuild;
 use crate::runner::PrefixTool;
-use crate::theme::{hex_alpha, hex_color, kd};
+use crate::theme::{accent_alpha, hex_color, kd};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
@@ -834,7 +834,7 @@ pub fn open_winetricks_dialog(
                         div()
                             .p_2p5()
                             .rounded(px(6.))
-                            .bg(hex_alpha(0x8ba4b01a))
+                            .bg(accent_alpha(0x1a))
                             .text_xs()
                             .text_color(hex_color(kd::FG_SUBTLE))
                             .child("Runs `umu-run winetricks <verbs...>` directly inside the selected prefix and streams live output to the Live Console tab."),
