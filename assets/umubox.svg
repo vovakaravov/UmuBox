@@ -1,10 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect x="6" y="6" width="116" height="116" rx="26" fill="#181616" stroke="#393836" stroke-width="4"/>
-  <ellipse cx="64" cy="64" rx="44" ry="18" transform="rotate(-24 64 64)" fill="none" stroke="#b6927b" stroke-width="4.5" stroke-opacity="0.88"/>
-  <ellipse cx="64" cy="64" rx="44" ry="18" transform="rotate(24 64 64)" fill="none" stroke="#8ea4a2" stroke-width="3" stroke-opacity="0.45"/>
-  <polygon points="64,30 92,46 64,62 36,46" fill="#8ba4b0" stroke="#181616" stroke-width="2" stroke-linejoin="round"/>
-  <polygon points="36,46 64,62 64,96 36,80" fill="#282727" stroke="#8ba4b0" stroke-width="2.2" stroke-linejoin="round"/>
-  <polygon points="64,62 92,46 92,80 64,96" fill="#1d1c19" stroke="#8ea4a2" stroke-width="2.2" stroke-linejoin="round"/>
-  <circle cx="96" cy="40" r="6" fill="#dcd7ba"/>
-  <circle cx="96" cy="40" r="2.8" fill="#c4b28a"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+ <rect style="opacity:0.2" x="4" y="5" width="56" height="56" rx="10" ry="10"/>
+ <rect style="fill:#1e88e5" x="4" y="4" width="56" height="56" rx="10" ry="10"/>
+ <path style="fill:#ffffff;opacity:0.2" d="M 14,4 C 8.46,4 4,8.46 4,14 V 15 C 4,9.46 8.46,5 14,5 H 50 C 55.54,5 60,9.46 60,15 V 14 C 60,8.46 55.54,4 50,4 Z"/>
+ <path d="M 10,33 A 22,8.2 0 0 1 54,33" transform="rotate(-28 32 33)" fill="none" stroke="#e3f2fd" stroke-width="2.8" stroke-linecap="round" opacity="0.72"/>
+ <polygon style="opacity:0.2" points="32,18 46.5,26 46.5,42 32,50 17.5,42 17.5,26"/>
+ <polygon style="fill:#ffffff" points="32,17 46.5,25 32,33 17.5,25"/>
+ <polygon style="fill:#bbdefb" points="17.5,25 32,33 32,49 17.5,41"/>
+ <polygon style="fill:#64b5f6" points="32,33 46.5,25 46.5,41 32,49"/>
+ <path d="M 10,33 A 22,8.2 0 0 0 54,33" transform="translate(0,1) rotate(-28 32 33)" fill="none" stroke="#000000" stroke-width="3.2" stroke-linecap="round" opacity="0.2"/>
+ <path d="M 10,33 A 22,8.2 0 0 0 54,33" transform="rotate(-28 32 33)" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+ <circle style="opacity:0.2" cx="48.6" cy="21.7" r="4.6"/>
+ <circle style="fill:#ffb74d" cx="48.6" cy="20.7" r="4.5"/>
+ <circle style="fill:#fff8e1" cx="48.6" cy="20.7" r="1.8"/>
 </svg>
