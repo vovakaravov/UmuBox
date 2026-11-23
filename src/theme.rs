@@ -1,33 +1,33 @@
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Hsla, px, rgb, rgba};
 
-/// Midnight Cobalt dark palette tailored to UmuBox's cobalt cube & Proton orb icon.
+/// Kanagawa Dragon charcoal with a subtle steel-blue tint & cobalt wave accent.
 #[allow(dead_code)]
 pub mod kd {
-    pub const BG_DEEP: u32 = 0x090e16;
-    pub const BG_MAIN: u32 = 0x0f1724;
-    pub const BG_SIDEBAR: u32 = 0x141f30;
-    pub const BG_PANEL: u32 = 0x1b293f;
-    pub const BG_BTN: u32 = 0x243652;
-    pub const BG_BTN_HOVER: u32 = 0x2f4568;
-    pub const BG_BTN_ACTIVE: u32 = 0x1d2c44;
+    pub const BG_DEEP: u32 = 0x0c0d10;
+    pub const BG_MAIN: u32 = 0x16171b;
+    pub const BG_SIDEBAR: u32 = 0x1b1d22;
+    pub const BG_PANEL: u32 = 0x25282f;
+    pub const BG_BTN: u32 = 0x343842;
+    pub const BG_BTN_HOVER: u32 = 0x414652;
+    pub const BG_BTN_ACTIVE: u32 = 0x2c3038;
 
-    pub const BORDER: u32 = 0x2c4161;
-    pub const BORDER_SUBTLE: u32 = 0x1e2d45;
+    pub const BORDER: u32 = 0x373c46;
+    pub const BORDER_SUBTLE: u32 = 0x272a32;
 
-    pub const FG: u32 = 0xdde7f4;
-    pub const FG_MUTED: u32 = 0x667c9b;
-    pub const FG_SUBTLE: u32 = 0x92a7c4;
+    pub const FG: u32 = 0xdcd7ba;
+    pub const FG_MUTED: u32 = 0x717580;
+    pub const FG_SUBTLE: u32 = 0x9b9fa8;
 
-    pub const BLUE: u32 = 0x499ef5;
-    pub const LINK: u32 = 0x6cb5fa;
-    pub const GREEN: u32 = 0x59c98c;
-    pub const YELLOW: u32 = 0xf2b054;
-    pub const RED: u32 = 0xe06c75;
-    pub const VIOLET: u32 = 0x998ae6;
-    pub const ORANGE: u32 = 0xe89948;
-    pub const AQUA: u32 = 0x5cc4cf;
-    pub const PINK: u32 = 0xd189b5;
+    pub const BLUE: u32 = 0x6ea6d4;
+    pub const LINK: u32 = 0x82b4dc;
+    pub const GREEN: u32 = 0x87a987;
+    pub const YELLOW: u32 = 0xcfb682;
+    pub const RED: u32 = 0xc4746e;
+    pub const VIOLET: u32 = 0x957fb8;
+    pub const ORANGE: u32 = 0xcc966e;
+    pub const AQUA: u32 = 0x8ea4a2;
+    pub const PINK: u32 = 0xa292a3;
 }
 
 #[inline]
@@ -45,7 +45,7 @@ pub fn accent_alpha(alpha: u8) -> Hsla {
     rgba((kd::BLUE << 8) | (alpha as u32)).into()
 }
 
-/// Applies the Midnight Cobalt theme globally to GPUI Component.
+/// Applies the Kanagawa Dragon + Cobalt Wave theme globally to GPUI Component.
 pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
     Theme::change(ThemeMode::Dark, None, cx);
 
@@ -64,7 +64,7 @@ pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
         c.muted_foreground = hex_color(kd::FG_MUTED);
         c.accent = hex_color(kd::BG_PANEL);
         c.accent_foreground = hex_color(kd::FG);
-        c.overlay = hex_alpha(0x090e16cc);
+        c.overlay = hex_alpha(0x0c0d10cc);
 
         c.popover = hex_color(kd::BG_PANEL);
         c.popover_foreground = hex_color(kd::FG);
@@ -82,14 +82,14 @@ pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
         c.button_secondary_foreground = hex_color(kd::FG);
 
         c.primary = hex_color(kd::BLUE);
-        c.primary_hover = hex_color(0x66b0f8);
-        c.primary_active = hex_color(0x3386dc);
-        c.primary_foreground = hex_color(kd::BG_DEEP);
+        c.primary_hover = hex_color(0x85b7e0);
+        c.primary_active = hex_color(0x5990bd);
+        c.primary_foreground = hex_color(kd::BG_MAIN);
 
         c.button_primary = hex_color(kd::BLUE);
-        c.button_primary_hover = hex_color(0x66b0f8);
-        c.button_primary_active = hex_color(0x3386dc);
-        c.button_primary_foreground = hex_color(kd::BG_DEEP);
+        c.button_primary_hover = hex_color(0x85b7e0);
+        c.button_primary_active = hex_color(0x5990bd);
+        c.button_primary_foreground = hex_color(kd::BG_MAIN);
 
         c.secondary = hex_color(kd::BG_BTN);
         c.secondary_hover = hex_color(kd::BG_BTN_HOVER);
@@ -97,34 +97,34 @@ pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
         c.secondary_foreground = hex_color(kd::FG);
 
         c.danger = hex_color(kd::RED);
-        c.danger_hover = hex_color(0xe8838b);
-        c.danger_active = hex_color(0xc7565f);
-        c.danger_foreground = hex_color(kd::BG_DEEP);
+        c.danger_hover = hex_color(0xd4847e);
+        c.danger_active = hex_color(0xb0635e);
+        c.danger_foreground = hex_color(kd::BG_MAIN);
 
         c.button_danger = hex_color(kd::RED);
-        c.button_danger_hover = hex_color(0xe8838b);
-        c.button_danger_active = hex_color(0xc7565f);
-        c.button_danger_foreground = hex_color(kd::BG_DEEP);
+        c.button_danger_hover = hex_color(0xd4847e);
+        c.button_danger_active = hex_color(0xb0635e);
+        c.button_danger_foreground = hex_color(kd::BG_MAIN);
 
         c.success = hex_color(kd::GREEN);
-        c.success_hover = hex_color(0x73d6a0);
-        c.success_active = hex_color(0x45b076);
-        c.success_foreground = hex_color(kd::BG_DEEP);
+        c.success_hover = hex_color(0x97ba97);
+        c.success_active = hex_color(0x759675);
+        c.success_foreground = hex_color(kd::BG_MAIN);
 
         c.button_success = hex_color(kd::GREEN);
-        c.button_success_hover = hex_color(0x73d6a0);
-        c.button_success_active = hex_color(0x45b076);
-        c.button_success_foreground = hex_color(kd::BG_DEEP);
+        c.button_success_hover = hex_color(0x97ba97);
+        c.button_success_active = hex_color(0x759675);
+        c.button_success_foreground = hex_color(kd::BG_MAIN);
 
         c.info = hex_color(kd::BLUE);
-        c.info_hover = hex_color(0x66b0f8);
-        c.info_active = hex_color(0x3386dc);
-        c.info_foreground = hex_color(kd::BG_DEEP);
+        c.info_hover = hex_color(0x85b7e0);
+        c.info_active = hex_color(0x5990bd);
+        c.info_foreground = hex_color(kd::BG_MAIN);
 
         c.warning = hex_color(kd::YELLOW);
-        c.warning_hover = hex_color(0xf5c278);
-        c.warning_active = hex_color(0xd9993c);
-        c.warning_foreground = hex_color(kd::BG_DEEP);
+        c.warning_hover = hex_color(0xdcc597);
+        c.warning_active = hex_color(0xb89f6b);
+        c.warning_foreground = hex_color(kd::BG_MAIN);
 
         c.sidebar = hex_color(kd::BG_SIDEBAR);
         c.sidebar_border = hex_color(kd::BORDER_SUBTLE);
@@ -132,7 +132,7 @@ pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
         c.sidebar_accent = hex_color(kd::BG_PANEL);
         c.sidebar_accent_foreground = hex_color(kd::FG);
         c.sidebar_primary = hex_color(kd::BLUE);
-        c.sidebar_primary_foreground = hex_color(kd::BG_DEEP);
+        c.sidebar_primary_foreground = hex_color(kd::BG_MAIN);
 
         c.title_bar = hex_color(kd::BG_DEEP);
         c.title_bar_border = hex_color(kd::BORDER_SUBTLE);
@@ -145,7 +145,7 @@ pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
         c.selection = accent_alpha(0x42);
 
         c.link = hex_color(kd::LINK);
-        c.link_hover = hex_color(0x88c5fc);
+        c.link_hover = hex_color(0x9ac5e8);
         c.link_active = hex_color(kd::BLUE);
 
         c.list = hex_color(kd::BG_SIDEBAR);
@@ -164,8 +164,8 @@ pub fn apply_kanagawa_dragon_theme(cx: &mut App) {
         c.tab_active_foreground = hex_color(kd::FG);
 
         c.scrollbar = hex_alpha(0x00000000);
-        c.scrollbar_thumb = hex_alpha(0x667c9b66);
-        c.scrollbar_thumb_hover = hex_alpha(0x92a7c4aa);
+        c.scrollbar_thumb = hex_alpha(0x71758066);
+        c.scrollbar_thumb_hover = hex_alpha(0x9b9fa8aa);
 
         c.red = hex_color(kd::RED);
         c.green = hex_color(kd::GREEN);
