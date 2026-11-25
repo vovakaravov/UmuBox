@@ -87,6 +87,55 @@ pub fn cache_dir() -> PathBuf {
         .join("umubox")
 }
 
+pub fn host_proton_arch() -> &'static str {
+    std::env::consts::ARCH
+}
+
+fn is_arch_token_in_name(lower: &str, token: &str) -> bool {
+    lower.contains(&format!("-{token}"))
+        || lower.contains(&format!("_{token}"))
+        || lower.contains(&format!(".{token}"))
+}
+
+pub fn is_compatible_with_arch(name: &str, host_arch: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    if is_arch_token_in_name(&lower, "armhf")
+        || is_arch_token_in_name(&lower, "armv7")
+        || is_arch_token_in_name(&lower, "riscv64")
+    {
+        return false;
+    }
+    let is_arm64 =
+        is_arch_token_in_name(&lower, "aarch64") || is_arch_token_in_name(&lower, "arm64");
+    let is_x86_64 =
+        is_arch_token_in_name(&lower, "x86_64") || is_arch_token_in_name(&lower, "amd64");
+
+    match host_arch {
+        "aarch64" => is_arm64 && !is_x86_64,
+        "x86_64" => !is_arm64,
+        _ => true,
+    }
+}
+
+fn is_wineserver_compatible_with_arch(wineserver: Option<&Path>, host_arch: &str) -> bool {
+    let Some(path) = wineserver else {
+        return true;
+    };
+    let Ok(mut file) = File::open(path) else {
+        return true;
+    };
+    let mut hdr = [0u8; 20];
+    if file.read_exact(&mut hdr).is_err() || &hdr[..4] != b"\x7fELF" || hdr[5] != 1 {
+        return true;
+    }
+    let e_machine = u16::from_le_bytes([hdr[18], hdr[19]]);
+    match host_arch {
+        "x86_64" => !matches!(e_machine, 0x00B7 | 0x0028 | 0x00F3),
+        "aarch64" => !matches!(e_machine, 0x003E | 0x0003),
+        _ => true,
+    }
+}
+
 pub fn parse_version_file(contents: &str) -> Option<String> {
     let line = contents.lines().next()?.trim();
     if line.is_empty() {
@@ -134,6 +183,13 @@ fn read_build(dir: PathBuf, source: ProtonSource) -> Option<ProtonBuild> {
         .and_then(|s| parse_version_file(&s))
         .unwrap_or_else(|| name.clone());
     let wineserver = find_wineserver_in_proton(&canonical_path);
+    let host_arch = host_proton_arch();
+    if !is_compatible_with_arch(&name, host_arch)
+        || !is_compatible_with_arch(&version_tag, host_arch)
+        || !is_wineserver_compatible_with_arch(wineserver.as_deref(), host_arch)
+    {
+        return None;
+    }
     Some(ProtonBuild {
         name,
         version_tag,
@@ -225,16 +281,26 @@ pub fn discover_proton_builds_in(
 }
 
 pub fn normalize_ge_tag(raw: &str) -> String {
-    raw.trim()
-        .trim_end_matches("-x86_64")
-        .trim_end_matches(".tar.gz")
-        .to_ascii_lowercase()
+    let mut s = raw.trim().to_ascii_lowercase();
+    if let Some(stripped) = s.strip_suffix(".tar.gz") {
+        s = stripped.to_string();
+    }
+    for suffix in ["-x86_64", "-amd64", "-aarch64", "-arm64"] {
+        if let Some(stripped) = s.strip_suffix(suffix) {
+            s = stripped.to_string();
+            break;
+        }
+    }
+    s
 }
 
 pub fn is_release_installed(tag: &str, installed: &[ProtonBuild]) -> bool {
     let target = normalize_ge_tag(tag);
+    let host_arch = host_proton_arch();
     installed.iter().any(|b| {
-        normalize_ge_tag(&b.version_tag) == target || normalize_ge_tag(&b.name) == target
+        is_compatible_with_arch(&b.name, host_arch)
+            && is_compatible_with_arch(&b.version_tag, host_arch)
+            && (normalize_ge_tag(&b.version_tag) == target || normalize_ge_tag(&b.name) == target)
     })
 }
 
@@ -267,6 +333,81 @@ pub fn verify_sha512_file(tarball: &Path, expected_sum_text: &str) -> Result<()>
         bail!("SHA-512 mismatch: expected {expected}, got {actual}");
     }
     Ok(())
+}
+
+fn asset_name(a: &serde_json::Value) -> Option<&str> {
+    a.get("name").and_then(|n| n.as_str())
+}
+
+fn asset_download_url(a: &serde_json::Value) -> Option<&str> {
+    a.get("browser_download_url").and_then(|u| u.as_str())
+}
+
+fn has_explicit_x86_64(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    is_arch_token_in_name(&lower, "x86_64") || is_arch_token_in_name(&lower, "amd64")
+}
+
+pub fn select_release_assets_for_arch<'a>(
+    assets: &'a [serde_json::Value],
+    host_arch: &str,
+) -> Option<(&'a serde_json::Value, Option<&'a str>)> {
+    let tarballs: Vec<&serde_json::Value> = assets
+        .iter()
+        .filter(|a| {
+            asset_name(a)
+                .is_some_and(|n| n.ends_with(".tar.gz") && !n.ends_with(".sha512sum"))
+        })
+        .collect();
+
+    let tb = if host_arch == "x86_64" {
+        tarballs
+            .iter()
+            .copied()
+            .find(|a| asset_name(a).is_some_and(has_explicit_x86_64))
+            .or_else(|| {
+                tarballs
+                    .iter()
+                    .copied()
+                    .find(|a| asset_name(a).is_some_and(|n| is_compatible_with_arch(n, host_arch)))
+            })
+    } else {
+        tarballs
+            .iter()
+            .copied()
+            .find(|a| asset_name(a).is_some_and(|n| is_compatible_with_arch(n, host_arch)))
+    }?;
+
+    let tb_name = asset_name(tb)?;
+    let stem = tb_name.strip_suffix(".tar.gz").unwrap_or(tb_name);
+    let exact_stem = format!("{stem}.sha512sum").to_ascii_lowercase();
+    let exact_full = format!("{tb_name}.sha512sum").to_ascii_lowercase();
+
+    let sums: Vec<&serde_json::Value> = assets
+        .iter()
+        .filter(|a| asset_name(a).is_some_and(|n| n.ends_with(".sha512sum")))
+        .collect();
+
+    let matched_sum = sums
+        .iter()
+        .copied()
+        .find(|a| {
+            asset_name(a).is_some_and(|n| {
+                let lower = n.to_ascii_lowercase();
+                lower == exact_stem || lower == exact_full
+            })
+        })
+        .or_else(|| {
+            let compat_sums: Vec<&serde_json::Value> = sums
+                .iter()
+                .copied()
+                .filter(|a| asset_name(a).is_some_and(|n| is_compatible_with_arch(n, host_arch)))
+                .collect();
+            (compat_sums.len() == 1).then_some(compat_sums[0])
+        })
+        .and_then(asset_download_url);
+
+    Some((tb, matched_sum))
 }
 
 pub fn fetch_ge_proton_releases(limit: usize) -> Result<Vec<GeProtonRelease>> {
@@ -329,31 +470,18 @@ pub fn fetch_ge_proton_releases(limit: usize) -> Result<Vec<GeProtonRelease>> {
             .map(Vec::as_slice)
             .unwrap_or(&[]);
 
-        let tarball_asset = assets.iter().find(|a| {
-            a.get("name")
-                .and_then(|n| n.as_str())
-                .is_some_and(|n| n.ends_with(".tar.gz") && !n.ends_with(".sha512sum"))
-        });
-        let Some(tb) = tarball_asset else {
+        let (tb, sha512_url) =
+            match select_release_assets_for_arch(assets, host_proton_arch()) {
+                Some((tb, sum)) => (tb, sum.map(ToString::to_string)),
+                None => continue,
+            };
+        let Some(tarball_name) = asset_name(tb) else {
             continue;
         };
-        let Some(tarball_name) = tb.get("name").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(tarball_url) = tb.get("browser_download_url").and_then(|v| v.as_str()) else {
+        let Some(tarball_url) = asset_download_url(tb) else {
             continue;
         };
         let tarball_size = tb.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-
-        let sha512_url = assets
-            .iter()
-            .find(|a| {
-                a.get("name")
-                    .and_then(|n| n.as_str())
-                    .is_some_and(|n| n.ends_with(".sha512sum"))
-            })
-            .and_then(|a| a.get("browser_download_url").and_then(|v| v.as_str()))
-            .map(ToString::to_string);
 
         releases.push(GeProtonRelease {
             tag: tag.to_string(),
@@ -616,5 +744,77 @@ mod tests {
         assert!(remove_user_proton_build_from(&sys_ge, &user_dir).is_err());
         assert!(remove_user_proton_build_from(&user_ge, &user_dir).is_ok());
         assert!(!user_ge.exists());
+    }
+
+    #[test]
+    fn selects_host_arch_tarball_and_matching_checksum_from_multiarch_release() {
+        let assets = vec![
+            serde_json::json!({
+                "name": "GE-Proton11-14-aarch64.sha512sum",
+                "browser_download_url": "https://example.invalid/GE-Proton11-14-aarch64.sha512sum"
+            }),
+            serde_json::json!({
+                "name": "GE-Proton11-14-aarch64.tar.gz",
+                "browser_download_url": "https://example.invalid/GE-Proton11-14-aarch64.tar.gz"
+            }),
+            serde_json::json!({
+                "name": "GE-Proton11-14-x86_64.sha512sum",
+                "browser_download_url": "https://example.invalid/GE-Proton11-14-x86_64.sha512sum"
+            }),
+            serde_json::json!({
+                "name": "GE-Proton11-14-x86_64.tar.gz",
+                "browser_download_url": "https://example.invalid/GE-Proton11-14-x86_64.tar.gz"
+            }),
+        ];
+
+        let (tb_x86, sum_x86) = select_release_assets_for_arch(&assets, "x86_64").unwrap();
+        assert_eq!(asset_name(tb_x86), Some("GE-Proton11-14-x86_64.tar.gz"));
+        assert_eq!(
+            sum_x86,
+            Some("https://example.invalid/GE-Proton11-14-x86_64.sha512sum")
+        );
+
+        let (tb_arm, sum_arm) = select_release_assets_for_arch(&assets, "aarch64").unwrap();
+        assert_eq!(asset_name(tb_arm), Some("GE-Proton11-14-aarch64.tar.gz"));
+        assert_eq!(
+            sum_arm,
+            Some("https://example.invalid/GE-Proton11-14-aarch64.sha512sum")
+        );
+
+        let legacy_assets = vec![
+            serde_json::json!({
+                "name": "GE-Proton9-27.sha512sum",
+                "browser_download_url": "https://example.invalid/GE-Proton9-27.sha512sum"
+            }),
+            serde_json::json!({
+                "name": "GE-Proton9-27.tar.gz",
+                "browser_download_url": "https://example.invalid/GE-Proton9-27.tar.gz"
+            }),
+        ];
+        let (tb_leg, sum_leg) = select_release_assets_for_arch(&legacy_assets, "x86_64").unwrap();
+        assert_eq!(asset_name(tb_leg), Some("GE-Proton9-27.tar.gz"));
+        assert_eq!(
+            sum_leg,
+            Some("https://example.invalid/GE-Proton9-27.sha512sum")
+        );
+        assert!(select_release_assets_for_arch(&legacy_assets, "aarch64").is_none());
+    }
+
+    #[test]
+    fn validates_arch_compatibility_and_tag_normalization() {
+        assert!(is_compatible_with_arch("GE-Proton11-14-x86_64", "x86_64"));
+        assert!(is_compatible_with_arch("GE-Proton9-27", "x86_64"));
+        assert!(!is_compatible_with_arch("GE-Proton11-14-aarch64", "x86_64"));
+        assert!(is_compatible_with_arch("GE-Proton11-14-aarch64", "aarch64"));
+        assert!(!is_compatible_with_arch("GE-Proton11-14-x86_64", "aarch64"));
+
+        assert_eq!(
+            normalize_ge_tag("GE-Proton11-14-x86_64.tar.gz"),
+            "ge-proton11-14"
+        );
+        assert_eq!(
+            normalize_ge_tag("GE-Proton11-14-aarch64.tar.gz"),
+            "ge-proton11-14"
+        );
     }
 }
