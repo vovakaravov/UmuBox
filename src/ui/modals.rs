@@ -1,8 +1,8 @@
-use super::UmuBoxApp;
+use super::{UmuBoxApp, lookup_modals};
 use crate::config::{GameEntry, LaunchOptions, format_extra_env, parse_extra_env, slugify_id};
+use crate::deps::PREFIX_PRESETS;
 use crate::icons::load_gpui_preview_for_source;
 use crate::proton::ProtonBuild;
-use crate::runner::PrefixTool;
 use crate::theme::{accent_alpha, hex_color, kd};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
@@ -426,6 +426,10 @@ pub fn open_game_dialog(
 
         let p_inherit = proton_state.clone();
         let app_inherit = app_entity.clone();
+        let gid_for_lookup = game_id_input.clone();
+        let name_for_lookup = name_input.clone();
+        let exe_for_lookup = exe_input.clone();
+        let app_for_lookup = app_entity.clone();
 
         let app_ok = app_entity.clone();
         let name_ok = name_input.clone();
@@ -668,8 +672,67 @@ pub fn open_game_dialog(
                     .child(
                         h_flex()
                             .gap_2()
+                            .items_end()
                             .child(div().flex_1().child(field_block("Arguments", Input::new(&args_input))))
-                            .child(div().w(px(200.)).child(field_block("UMU GAMEID", Input::new(&game_id_input)))),
+                            .child(
+                                v_flex()
+                                    .w(px(265.))
+                                    .gap_1()
+                                    .child(field_label("UMU GAMEID"))
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .items_center()
+                                            .child(div().flex_1().child(Input::new(&game_id_input)))
+                                            .child(
+                                                Button::new("game-gid-lookup")
+                                                    .outline()
+                                                    .small()
+                                                    .icon(IconName::Search)
+                                                    .label("Lookup…")
+                                                    .tooltip("Search UMU Database & ProtonDB")
+                                                    .on_click(move |_, window, cx| {
+                                                        let mut seed = name_for_lookup
+                                                            .read(cx)
+                                                            .value()
+                                                            .trim()
+                                                            .to_string();
+                                                        if seed.is_empty() {
+                                                            let exe_v = exe_for_lookup
+                                                                .read(cx)
+                                                                .value()
+                                                                .trim()
+                                                                .to_string();
+                                                            if !exe_v.is_empty() {
+                                                                seed = PathBuf::from(exe_v)
+                                                                    .file_stem()
+                                                                    .and_then(|s| s.to_str())
+                                                                    .unwrap_or("")
+                                                                    .to_string();
+                                                            }
+                                                        }
+                                                        let gid_target = gid_for_lookup.clone();
+                                                        let app_ref = app_for_lookup.clone();
+                                                        lookup_modals::open_umu_lookup_dialog(
+                                                            app_for_lookup.clone(),
+                                                            seed,
+                                                            "Lookup UMU GAMEID".to_string(),
+                                                            Rc::new(move |chosen_id, window, cx| {
+                                                                gid_target.update(cx, |st, cx| {
+                                                                    st.set_value(
+                                                                        chosen_id, window, cx,
+                                                                    );
+                                                                });
+                                                                window.refresh();
+                                                                cx.notify(app_ref.entity_id());
+                                                            }),
+                                                            window,
+                                                            cx,
+                                                        );
+                                                    }),
+                                            ),
+                                    ),
+                            ),
                     )
                     .child(
                         v_flex()
@@ -783,6 +846,7 @@ pub fn open_winetricks_dialog(
     let verb_input = cx.new(|cx| {
         InputState::new(window, cx).placeholder("Verbs separated by space, e.g. vcrun2022 corefonts")
     });
+    let quiet_mode = Rc::new(Cell::new(true));
     let initial_focus = Cell::new(true);
 
     let presets = [
@@ -801,6 +865,33 @@ pub fn open_winetricks_dialog(
 
         let input_ok = verb_input.clone();
         let app_ok = app_entity.clone();
+        let q_flag = quiet_mode.clone();
+        let q_toggle = quiet_mode.clone();
+        let q_ok = quiet_mode.clone();
+        let app_q = app_entity.clone();
+
+        let bundle_btns = PREFIX_PRESETS.iter().enumerate().map(|(pi, bundle)| {
+            let v_inp = verb_input.clone();
+            let app_r = app_entity.clone();
+            let verbs_joined = bundle.verbs.join(" ");
+            Button::new(SharedString::from(format!("wt-bundle-{pi}")))
+                .outline()
+                .xsmall()
+                .label(bundle.name)
+                .tooltip(bundle.description)
+                .on_click(move |_, window, cx| {
+                    let cur = v_inp.read(cx).value().trim().to_string();
+                    let mut list: Vec<String> = cur.split_whitespace().map(ToString::to_string).collect();
+                    for v in verbs_joined.split_whitespace() {
+                        if !list.iter().any(|existing| existing == v) {
+                            list.push(v.to_string());
+                        }
+                    }
+                    v_inp.update(cx, |st, cx| st.set_value(list.join(" "), window, cx));
+                    window.refresh();
+                    cx.notify(app_r.entity_id());
+                })
+        });
 
         let preset_btns = presets.iter().map(|&verb| {
             let v_inp = verb_input.clone();
@@ -826,7 +917,7 @@ pub fn open_winetricks_dialog(
 
         dialog
             .title(format!("Run Winetricks in '{pfx_name}'"))
-            .w(px(500.))
+            .w(px(560.))
             .child(
                 v_flex()
                     .gap_3()
@@ -837,15 +928,31 @@ pub fn open_winetricks_dialog(
                             .bg(accent_alpha(0x1a))
                             .text_xs()
                             .text_color(hex_color(kd::FG_SUBTLE))
-                            .child("Runs `umu-run winetricks <verbs...>` directly inside the selected prefix and streams live output to the Live Console tab."),
+                            .child("Runs `umu-run winetricks [-q] <verbs...>` directly inside the selected prefix and streams live output to the Live Console tab."),
                     )
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(field_label("Common Verbs"))
+                            .child(field_label("Curated Bundles"))
+                            .child(h_flex().gap_1().flex_wrap().children(bundle_btns)),
+                    )
+                    .child(
+                        v_flex()
+                            .gap_1()
+                            .child(field_label("Common Individual Verbs"))
                             .child(h_flex().gap_1().flex_wrap().children(preset_btns)),
                     )
-                    .child(field_block("Verbs to Install", Input::new(&verb_input))),
+                    .child(field_block("Verbs to Install", Input::new(&verb_input)))
+                    .child(
+                        Switch::new("wt-quiet-mode")
+                            .checked(q_flag.get())
+                            .label("Quiet / unattended install (-q)")
+                            .on_click(move |val: &bool, window, cx| {
+                                q_toggle.set(*val);
+                                window.refresh();
+                                cx.notify(app_q.entity_id());
+                            }),
+                    ),
             )
             .footer(
                 DialogFooter::new()
@@ -866,15 +973,10 @@ pub fn open_winetricks_dialog(
                                 }
                                 let verbs: Vec<String> =
                                     raw.split_whitespace().map(ToString::to_string).collect();
+                                let quiet = q_ok.get();
                                 window.close_dialog(cx);
                                 app_ok.update(cx, |app, cx| {
-                                    app.run_tool_on_prefix(
-                                        pfx_idx,
-                                        PrefixTool::Winetricks,
-                                        verbs,
-                                        window,
-                                        cx,
-                                    );
+                                    app.run_winetricks_verbs(pfx_idx, verbs, quiet, window, cx);
                                 });
                             }),
                     ),

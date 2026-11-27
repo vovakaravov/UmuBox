@@ -1,5 +1,7 @@
 mod cli;
 mod config;
+mod deps;
+mod gamedb;
 mod icons;
 mod proton;
 mod runner;

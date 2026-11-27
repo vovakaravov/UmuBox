@@ -1,4 +1,5 @@
 pub mod console_view;
+pub mod lookup_modals;
 pub mod modals;
 pub mod prefix_view;
 pub mod proton_view;
@@ -7,6 +8,11 @@ pub mod sidebar;
 use crate::config::{
     AppConfig, GameEntry, LaunchOptions, PrefixConfig, format_extra_env, make_unique_id,
     parse_extra_env,
+};
+use crate::deps::merge_dll_overrides;
+use crate::gamedb::{
+    ProtonDbSummary, UmuDbEntry, extract_steam_appid, fetch_protondb_summary, load_cached_protondb,
+    load_umu_database, refresh_umu_database_online,
 };
 use crate::icons::{
     cached_icon_path, icon_key, load_gpui_image_from_cached, remove_cached_icon, sync_game_icon,
@@ -34,7 +40,7 @@ use gpui_kit::{
     IntoElement, KeyBinding, ParentElement, PathPromptOptions, Render, SharedString, Styled,
     Window, actions, div, prelude::FluentBuilder as _, px,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -76,6 +82,11 @@ pub struct UmuBoxApp {
     pub running_prefixes: HashMap<String, Vec<RunningProcess>>,
     pub prefix_sizes: HashMap<String, u64>,
     pub game_icons: HashMap<String, Arc<Image>>,
+    pub umu_db: Vec<UmuDbEntry>,
+    pub umu_db_source: Option<PathBuf>,
+    pub umu_db_refreshing: bool,
+    pub protondb_cache: HashMap<u64, ProtonDbSummary>,
+    pub protondb_loading: HashSet<u64>,
     pub ntsync_available: bool,
     pub umu_version: String,
     pub console_lines: Vec<String>,
@@ -155,6 +166,7 @@ impl UmuBoxApp {
 
         let (log_tx, log_rx): (Sender<String>, Receiver<String>) = std::sync::mpsc::channel();
         let running_prefixes = detect_running_prefixes(&config.prefixes);
+        let (umu_db, umu_db_source) = load_umu_database(&installed_protons);
 
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -169,10 +181,15 @@ impl UmuBoxApp {
             running_prefixes,
             prefix_sizes: HashMap::new(),
             game_icons: HashMap::new(),
+            umu_db,
+            umu_db_source,
+            umu_db_refreshing: false,
+            protondb_cache: HashMap::new(),
+            protondb_loading: HashSet::new(),
             ntsync_available: has_ntsync_device(),
             umu_version: detect_umu_version_label(),
             console_lines: vec![
-                "[UmuBox] Ready — Kanban & Proton prefixes loaded.".to_string(),
+                "[UmuBox] Ready — Kanagawa Dragon prefixes loaded.".to_string(),
             ],
             log_tx,
             default_game_id_input,
@@ -180,13 +197,15 @@ impl UmuBoxApp {
             extra_env_input,
         };
         app.console_lines[0] = format!(
-            "[UmuBox] Loaded {} prefix(es) & {} Proton build(s).",
+            "[UmuBox] Loaded {} prefix(es), {} Proton build(s), and {} UMU DB entries.",
             app.config.prefixes.len(),
-            app.installed_protons.len()
+            app.installed_protons.len(),
+            app.umu_db.len()
         );
 
         app.refresh_prefix_sizes(cx);
         app.refresh_game_icons(false, cx);
+        app.ensure_protondb_for_selected_prefix(cx);
 
         // Poll log receiver cleanly at 150ms & refresh live Wine processes every ~2.1s
         let rx = Arc::new(Mutex::new(log_rx));
@@ -341,10 +360,16 @@ impl UmuBoxApp {
 
     pub fn refresh_all(&mut self, cx: &mut Context<Self>) {
         self.installed_protons = discover_proton_builds();
+        let (db, src) = load_umu_database(&self.installed_protons);
+        if !db.is_empty() {
+            self.umu_db = db;
+            self.umu_db_source = src;
+        }
         self.ntsync_available = has_ntsync_device();
         let pfxs = self.config.prefixes.clone();
         self.refresh_prefix_sizes(cx);
         self.refresh_game_icons(false, cx);
+        self.ensure_protondb_for_selected_prefix(cx);
 
         cx.spawn(async move |this, cx| {
             let running = cx
@@ -365,7 +390,184 @@ impl UmuBoxApp {
         }
         self.selected_prefix = idx;
         self.sync_prefix_inputs(window, cx);
+        self.ensure_protondb_for_selected_prefix(cx);
         cx.notify();
+    }
+
+    pub fn ensure_protondb_for_selected_prefix(&mut self, cx: &mut Context<Self>) {
+        let Some(pfx) = self.config.prefixes.get(self.selected_prefix).cloned() else {
+            return;
+        };
+        self.ensure_protondb_for_game_id(&pfx.default_game_id, cx);
+        for g in &pfx.games {
+            let gid = if g.game_id.trim().is_empty() || g.game_id.trim() == "0" {
+                &pfx.default_game_id
+            } else {
+                &g.game_id
+            };
+            self.ensure_protondb_for_game_id(gid, cx);
+        }
+    }
+
+    pub fn ensure_protondb_for_game_id(&mut self, game_id: &str, cx: &mut Context<Self>) {
+        let Some(app_id) = extract_steam_appid(game_id) else {
+            return;
+        };
+        if self.protondb_cache.contains_key(&app_id) || self.protondb_loading.contains(&app_id) {
+            return;
+        }
+        if let Some(cached) = load_cached_protondb(app_id) {
+            self.protondb_cache.insert(app_id, cached);
+            return;
+        }
+        self.protondb_loading.insert(app_id);
+
+        cx.spawn(async move |this, cx| {
+            let res = cx
+                .background_executor()
+                .spawn(async move { fetch_protondb_summary(app_id) })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.protondb_loading.remove(&app_id);
+                if let Ok(summary) = res {
+                    app.protondb_cache.insert(app_id, summary);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub fn refresh_umu_db_online(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.umu_db_refreshing {
+            return;
+        }
+        self.umu_db_refreshing = true;
+        self.toast_ok("Refreshing UMU database from Open-Wine-Components…", window, cx);
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let res = cx
+                .background_executor()
+                .spawn(async move { refresh_umu_database_online() })
+                .await;
+            let _ = this.update_in(cx, |app, window, cx| {
+                app.umu_db_refreshing = false;
+                match res {
+                    Ok((entries, path)) => {
+                        let count = entries.len();
+                        app.umu_db = entries;
+                        app.umu_db_source = Some(path.clone());
+                        app.append_log(
+                            format!("[UmuBox] Refreshed UMU DB ({count} entries -> {}).", path.display()),
+                            cx,
+                        );
+                        app.toast_ok(format!("Updated UMU DB ({count} entries)"), window, cx);
+                    }
+                    Err(err) => {
+                        let msg = format!("{err}");
+                        app.append_log(format!("[UmuBox] ERROR refreshing UMU DB: {msg}"), cx);
+                        app.toast_err(msg, window, cx);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn set_prefix_game_id(
+        &mut self,
+        pfx_idx: usize,
+        game_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pfx) = self.config.prefixes.get_mut(pfx_idx) else {
+            return;
+        };
+        let clean = game_id.trim().to_string();
+        pfx.default_game_id = if clean.is_empty() {
+            "0".to_string()
+        } else {
+            clean.clone()
+        };
+        let gid_disp = pfx.default_game_id.clone();
+        let _ = self.config.save();
+        if pfx_idx == self.selected_prefix {
+            self.default_game_id_input
+                .update(cx, |s, cx| s.set_value(gid_disp.clone(), window, cx));
+        }
+        self.ensure_protondb_for_game_id(&gid_disp, cx);
+        self.toast_ok(format!("Prefix GAMEID set to {gid_disp}"), window, cx);
+        cx.notify();
+    }
+
+    pub fn apply_dll_overrides_to_prefix(
+        &mut self,
+        pfx_idx: usize,
+        additions: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pfx) = self.config.prefixes.get_mut(pfx_idx) else {
+            return;
+        };
+        let merged = merge_dll_overrides(&pfx.default_options.dll_overrides, &additions);
+        pfx.default_options.dll_overrides = merged.clone();
+        let _ = self.config.save();
+        if pfx_idx == self.selected_prefix {
+            self.dll_overrides_input
+                .update(cx, |s, cx| s.set_value(merged.clone(), window, cx));
+        }
+        self.toast_ok(format!("Updated prefix WINEDLLOVERRIDES: {merged}"), window, cx);
+        cx.notify();
+    }
+
+    pub fn apply_dll_overrides_to_game(
+        &mut self,
+        pfx_idx: usize,
+        game_idx: usize,
+        additions: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pfx) = self.config.prefixes.get_mut(pfx_idx) else {
+            return;
+        };
+        let Some(game) = pfx.games.get_mut(game_idx) else {
+            return;
+        };
+        let merged = merge_dll_overrides(&game.options.dll_overrides, &additions);
+        game.options.dll_overrides = merged.clone();
+        let gname = game.name.clone();
+        let _ = self.config.save();
+        self.sync_single_game_icon_and_desktop(pfx_idx, game_idx, false, window, cx);
+        self.toast_ok(format!("Updated WINEDLLOVERRIDES for '{gname}': {merged}"), window, cx);
+        cx.notify();
+    }
+
+    pub fn run_winetricks_verbs(
+        &mut self,
+        pfx_idx: usize,
+        verbs: Vec<String>,
+        quiet: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let clean: Vec<String> = verbs
+            .into_iter()
+            .filter(|v| !v.trim().is_empty())
+            .collect();
+        if clean.is_empty() {
+            return;
+        }
+        let mut args = Vec::new();
+        if quiet && !clean.iter().any(|a| a == "-q" || a == "--unattended") {
+            args.push("-q".to_string());
+        }
+        args.extend(clean);
+        self.run_tool_on_prefix(pfx_idx, PrefixTool::Winetricks, args, window, cx);
     }
 
     pub fn sync_prefix_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -548,6 +750,18 @@ impl UmuBoxApp {
         self.toast_ok(toast_msg, window, cx);
         let _ = self.config.save();
         self.sync_single_game_icon_and_desktop(pfx_idx, saved_idx, true, window, cx);
+        if let Some(saved) = self.config.prefixes.get(pfx_idx).and_then(|p| p.games.get(saved_idx)).cloned() {
+            let effective = if saved.game_id.trim().is_empty() || saved.game_id.trim() == "0" {
+                self.config
+                    .prefixes
+                    .get(pfx_idx)
+                    .map(|p| p.default_game_id.clone())
+                    .unwrap_or_default()
+            } else {
+                saved.game_id.clone()
+            };
+            self.ensure_protondb_for_game_id(&effective, cx);
+        }
         cx.notify();
     }
 
@@ -930,9 +1144,11 @@ impl UmuBoxApp {
 
         if let Some(pfx) = self.config.prefixes.get_mut(pfx_idx) {
             pfx.default_game_id = if gid.is_empty() { "0".to_string() } else { gid };
+            let eff_gid = pfx.default_game_id.clone();
             pfx.default_options.dll_overrides = dll;
             pfx.default_options.extra_env = extra;
             let _ = self.config.save();
+            self.ensure_protondb_for_game_id(&eff_gid, cx);
             self.toast_ok("Saved prefix environment settings", window, cx);
             cx.notify();
         }
@@ -1038,6 +1254,11 @@ impl UmuBoxApp {
                         if let Some(res) = res_opt {
                             app.download_state = None;
                             app.installed_protons = discover_proton_builds();
+                            let (db, src) = load_umu_database(&app.installed_protons);
+                            if !db.is_empty() {
+                                app.umu_db = db;
+                                app.umu_db_source = src;
+                            }
                             match res {
                                 Ok(installed_path) => {
                                     let msg = format!(

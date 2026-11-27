@@ -25,6 +25,13 @@
 - **Built-in GE-Proton Manager:**
   - Discovers **User** (`~/.local/share/Steam/compatibilitytools.d`), **System / AUR** (`/usr/share/steam/compatibilitytools.d`), and **Steam** Proton builds.
   - Checks GitHub for the latest **GE-Proton** releases, downloads with live progress, verifies **SHA-512** checksums before extracting, and lets you remove user-installed builds.
+- **UMU Database, Protonfixes & ProtonDB Integration:**
+  - Offline-first search over the 1,200+ title `umu-database.csv` bundled inside GE-Proton (with one-click online refresh from Open-Wine-Components) to auto-match `GAMEID`s.
+  - Inspects bundled `protonfixes` Python scripts to show an **Auto-Fix** badge and any auto-applied winetricks/DLL overrides before launching.
+  - Fetches & caches **ProtonDB** tier ratings (`Platinum` / `Gold` / `Silver` / `Bronze` / `Borked`) for Steam-mapped titles.
+- **Automatic DLL Scanner & One-Click Prefix Presets:**
+  - Scans PE32/PE32+ import tables (`.exe` and adjacent `.dll`s) for required runtimes (`vcrun2022`, `d3dx9`, `d3dcompiler_47`, `dotnet48`, `faudio`, etc.) and side-by-side mod/hook DLLs (`dinput8.dll`, `winmm.dll`, `version.dll`, etc. → one-click `WINEDLLOVERRIDES`).
+  - Includes 4 curated **Prefix Presets** (*Modern DX11/DX12*, *Classic DX9/DX10*, *Mod Managers & .NET*, *Cutscenes & Audio*) running unattended (`winetricks -q`).
 - **Live Console Log:** Streams `umu-run` stdout/stderr output in the dedicated **Console** tab.
 - **Full Headless CLI:** Run installers or executables directly (`umubox ./setup.exe`), launch saved games, manage prefixes/tools/icons/desktop entries, and install or remove GE-Proton builds from any terminal.
 
@@ -52,6 +59,10 @@ umubox proton list                            List installed Proton & GE-Proton 
 umubox proton check                           Check GitHub for latest GE-Proton releases
 umubox proton install [TAG]                   Download, SHA-512 verify, and install GE-Proton
 umubox proton remove <BUILD>                  Remove a user-installed Proton build
+umubox lookup <QUERY>                         Search UMU DB, protonfixes, and ProtonDB rating
+umubox scan <EXE> [--prefix PFX] [--apply]    Scan PE imports/mod DLLs & install missing winetricks
+umubox preset list                            List curated winetricks prefix presets
+umubox preset apply <PREFIX> <PRESET_ID>      Apply a prefix preset quietly via winetricks -q
 ```
 
 ---

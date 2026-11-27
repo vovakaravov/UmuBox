@@ -1,4 +1,11 @@
 use crate::config::{AppConfig, LaunchOptions, PrefixConfig, make_unique_id};
+use crate::deps::{
+    PREFIX_PRESETS, analyze_exe_dependencies, find_preset, read_installed_winetricks_verbs,
+};
+use crate::gamedb::{
+    extract_steam_appid, fetch_protondb_summary, find_protonfix_for_game_id, load_umu_database,
+    search_umu_database,
+};
 use crate::icons::{
     cached_icon_path, decode_best_ico_to_png, extract_best_icon_png_from_pe, sync_game_icon,
 };
@@ -80,6 +87,19 @@ pub enum CliCommand {
         exe: PathBuf,
         out_png: PathBuf,
     },
+    Lookup {
+        query: String,
+    },
+    Scan {
+        exe: PathBuf,
+        prefix: Option<String>,
+        apply: bool,
+    },
+    PresetList,
+    PresetApply {
+        prefix: String,
+        preset: String,
+    },
 }
 
 pub fn print_help() {
@@ -107,6 +127,10 @@ USAGE:
   umubox proton check                           Check GitHub for latest GE-Proton releases
   umubox proton install [TAG]                   Download, SHA-512 verify, and install GE-Proton
   umubox proton remove <BUILD>                  Remove a user-installed Proton build
+  umubox lookup <QUERY>                         Search UMU DB, protonfixes, and ProtonDB rating
+  umubox scan <EXE> [--prefix PFX] [--apply]    Scan PE imports/mod DLLs & install missing winetricks
+  umubox preset list                            List curated winetricks prefix presets
+  umubox preset apply <PREFIX> <PRESET_ID>      Apply a prefix preset quietly via winetricks -q
 
 RUN OPTIONS:
   -p, --prefix <ID|NAME|PATH>   Prefix to use (defaults to default prefix)
@@ -154,6 +178,16 @@ pub fn parse_cli_args(args: &[String]) -> Result<CliCommand> {
         "desktop" => parse_desktop_args(&args[1..]),
         "icon" => parse_icon_args(&args[1..]),
         "proton" => parse_proton_args(&args[1..]),
+        "lookup" => {
+            if args.len() < 2 {
+                bail!("Usage: umubox lookup <query>");
+            }
+            Ok(CliCommand::Lookup {
+                query: args[1..].join(" "),
+            })
+        }
+        "scan" => parse_scan_args(&args[1..]),
+        "preset" => parse_preset_args(&args[1..]),
         first => {
             let lower = first.to_ascii_lowercase();
             if Path::new(first).is_file()
@@ -428,6 +462,54 @@ fn parse_icon_args(rest: &[String]) -> Result<CliCommand> {
             })
         }
         _ => bail!("Usage: umubox icon <set <GAME> <PATH>|clear <GAME>|extract <EXE> <OUT.png>>"),
+    }
+}
+
+fn parse_scan_args(rest: &[String]) -> Result<CliCommand> {
+    let mut exe: Option<PathBuf> = None;
+    let mut prefix: Option<String> = None;
+    let mut apply = false;
+    let mut i = 0usize;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "-p" | "--prefix" => {
+                i += 1;
+                prefix = Some(
+                    rest.get(i)
+                        .ok_or_else(|| anyhow!("--prefix requires a prefix name/id"))?
+                        .clone(),
+                );
+            }
+            "--apply" => apply = true,
+            flag if flag.starts_with('-') => bail!("Unknown option '{flag}' for `umubox scan`"),
+            val => {
+                if exe.is_some() {
+                    bail!("Unexpected argument '{val}' for `umubox scan`");
+                }
+                exe = Some(PathBuf::from(val));
+            }
+        }
+        i += 1;
+    }
+    let exe = exe.ok_or_else(|| anyhow!("Usage: umubox scan <EXE> [--prefix PFX] [--apply]"))?;
+    Ok(CliCommand::Scan { exe, prefix, apply })
+}
+
+fn parse_preset_args(rest: &[String]) -> Result<CliCommand> {
+    match rest.first().map(String::as_str) {
+        Some("list" | "ls") => Ok(CliCommand::PresetList),
+        Some("apply" | "install") => {
+            let prefix = rest
+                .get(1)
+                .ok_or_else(|| anyhow!("Usage: umubox preset apply <prefix> <preset-id>"))?
+                .clone();
+            let preset = rest
+                .get(2)
+                .ok_or_else(|| anyhow!("Usage: umubox preset apply <prefix> <preset-id>"))?
+                .clone();
+            Ok(CliCommand::PresetApply { prefix, preset })
+        }
+        _ => bail!("Usage: umubox preset <list|apply <PREFIX> <PRESET_ID>>"),
     }
 }
 
@@ -944,6 +1026,153 @@ pub fn execute_cli(cmd: CliCommand) -> Result<i32> {
             println!("Extracted PNG icon ({} bytes) -> {}", png.len(), out_png.display());
             Ok(0)
         }
+        CliCommand::Lookup { query } => {
+            let builds = discover_proton_builds();
+            let (db, src) = load_umu_database(&builds);
+            if db.is_empty() {
+                bail!("No local umu-database.csv found in installed GE-Proton builds or cache");
+            }
+            println!(
+                "UMU Database ({} entries from {}):",
+                db.len(),
+                src.map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "unknown".into())
+            );
+            let hits = search_umu_database(&db, &query, 10);
+            if hits.is_empty() {
+                println!("  No matches for '{query}'.");
+                return Ok(0);
+            }
+            for e in &hits {
+                let fix = find_protonfix_for_game_id(&e.umu_id, &builds);
+                let fix_tag = match &fix {
+                    Some(f) if !f.detected_verbs.is_empty() => {
+                        format!(" [Auto-Fix: {}]", f.detected_verbs.join(","))
+                    }
+                    Some(_) => " [Auto-Fix]".to_string(),
+                    None => String::new(),
+                };
+                println!(
+                    "  - {:<14} | {:<10} | {}{}",
+                    e.umu_id, e.store, e.title, fix_tag
+                );
+            }
+            if let Some(app_id) = hits.iter().find_map(|h| extract_steam_appid(&h.umu_id)) {
+                match fetch_protondb_summary(app_id) {
+                    Ok(pdb) => println!(
+                        "\nProtonDB AppID {app_id}: tier={} (score {:.2}, {}, {} reports)",
+                        pdb.tier, pdb.score, pdb.confidence, pdb.total
+                    ),
+                    Err(err) => println!("\nProtonDB AppID {app_id}: {err}"),
+                }
+            }
+            Ok(0)
+        }
+        CliCommand::Scan { exe, prefix, apply } => {
+            let builds = discover_proton_builds();
+            let cfg = AppConfig::load_or_discover(&builds);
+            let pfx_opt = if prefix.is_some() || apply {
+                Some(resolve_prefix(&cfg, prefix.as_deref())?)
+            } else {
+                cfg.default_prefix_id
+                    .as_deref()
+                    .and_then(|id| cfg.prefixes.iter().find(|p| p.id == id))
+            };
+            let report = analyze_exe_dependencies(&exe, pfx_opt.map(|p| p.path.as_path()))?;
+            println!(
+                "Scanned {} ({} PE binary/ies, {} unique DLL imports)",
+                report.target_exe.display(),
+                report.scanned_binaries,
+                report.imported_dlls.len()
+            );
+            if report.recommendations.is_empty() {
+                println!("  No missing MSVC/DirectX/.NET runtime verbs flagged.");
+            } else {
+                println!("\nRecommended Winetricks Verbs:");
+                for r in &report.recommendations {
+                    let st = if r.already_installed { "installed" } else { "MISSING" };
+                    println!(
+                        "  - {:<14} [{}] {} ({})",
+                        r.verb,
+                        st,
+                        r.label,
+                        r.matched_dlls.join(", ")
+                    );
+                }
+            }
+            if !report.side_by_side_overrides.is_empty() {
+                println!("\nSide-by-Side Mod / Proxy DLL Overrides:");
+                for s in &report.side_by_side_overrides {
+                    println!("  - {} -> WINEDLLOVERRIDES={}", s.filename, s.override_spec);
+                }
+            }
+            if apply {
+                let pfx = pfx_opt.ok_or_else(|| anyhow!("No prefix selected to apply verbs"))?;
+                let missing: Vec<String> = report
+                    .recommendations
+                    .iter()
+                    .filter(|r| !r.already_installed)
+                    .map(|r| r.verb.clone())
+                    .collect();
+                if missing.is_empty() {
+                    println!("\nAll recommended verbs are already installed in '{}'.", pfx.name);
+                    return Ok(0);
+                }
+                println!("\nInstalling in '{}': umu-run winetricks -q {}", pfx.name, missing.join(" "));
+                let mut args = vec!["winetricks".to_string(), "-q".to_string()];
+                args.extend(missing);
+                let env_pairs = build_launch_env(
+                    pfx,
+                    None,
+                    &pfx.default_options,
+                    cfg.default_proton.as_deref(),
+                );
+                return run_umu_cli(&args, Some(&pfx.path), &env_pairs);
+            }
+            Ok(0)
+        }
+        CliCommand::PresetList => {
+            println!("Curated Prefix Presets ({}):", PREFIX_PRESETS.len());
+            for p in PREFIX_PRESETS {
+                println!("  - {:<16} | {} [{}]", p.id, p.name, p.verbs.join(" "));
+            }
+            Ok(0)
+        }
+        CliCommand::PresetApply { prefix, preset } => {
+            let builds = discover_proton_builds();
+            let cfg = AppConfig::load_or_discover(&builds);
+            let pfx = resolve_prefix(&cfg, Some(&prefix))?;
+            let found = find_preset(&preset).ok_or_else(|| {
+                anyhow!("Unknown preset '{preset}'. Run `umubox preset list` to see available presets.")
+            })?;
+            let installed = read_installed_winetricks_verbs(&pfx.path);
+            let missing: Vec<String> = found
+                .verbs
+                .iter()
+                .filter(|v| !installed.contains(&v.to_ascii_lowercase()))
+                .map(|v| (*v).to_string())
+                .collect();
+            let to_install: Vec<String> = if missing.is_empty() {
+                found.verbs.iter().map(|s| (*s).to_string()).collect()
+            } else {
+                missing
+            };
+            println!(
+                "Applying preset '{}' to '{}': umu-run winetricks -q {}",
+                found.name,
+                pfx.name,
+                to_install.join(" ")
+            );
+            let mut args = vec!["winetricks".to_string(), "-q".to_string()];
+            args.extend(to_install);
+            let env_pairs = build_launch_env(
+                pfx,
+                None,
+                &pfx.default_options,
+                cfg.default_proton.as_deref(),
+            );
+            run_umu_cli(&args, Some(&pfx.path), &env_pairs)
+        }
     }
 }
 
@@ -1088,6 +1317,31 @@ mod tests {
             CliCommand::IconExtract {
                 exe: PathBuf::from("/tmp/a.exe"),
                 out_png: PathBuf::from("/tmp/a.png"),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(&vec_s(&["lookup", "Witcher", "3"])).unwrap(),
+            CliCommand::Lookup {
+                query: "Witcher 3".into(),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(&vec_s(&["scan", "/tmp/game.exe", "--prefix", "default", "--apply"])).unwrap(),
+            CliCommand::Scan {
+                exe: PathBuf::from("/tmp/game.exe"),
+                prefix: Some("default".into()),
+                apply: true,
+            }
+        );
+        assert_eq!(
+            parse_cli_args(&vec_s(&["preset", "list"])).unwrap(),
+            CliCommand::PresetList
+        );
+        assert_eq!(
+            parse_cli_args(&vec_s(&["preset", "apply", "default", "modern-dx"])).unwrap(),
+            CliCommand::PresetApply {
+                prefix: "default".into(),
+                preset: "modern-dx".into(),
             }
         );
     }

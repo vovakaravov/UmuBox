@@ -1,4 +1,5 @@
-use super::{UmuBoxApp, modals};
+use super::{UmuBoxApp, lookup_modals, modals};
+use crate::gamedb::{extract_steam_appid, find_protonfix_for_game_id, open_url_in_browser, protondb_url};
 use crate::icons::icon_key;
 use crate::runner::{PrefixTool, format_bytes, is_desktop_entry_installed};
 use crate::theme::{hex_alpha, hex_color, kd};
@@ -237,6 +238,16 @@ pub fn render_prefix_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
         let app_icon_for_dlg = app_icon.clone();
         let has_custom_icon = game.icon_override.is_some();
         let in_menu = game.desktop_managed || is_desktop_entry_installed(&pfx.id, &game.id);
+        let eff_gid = if game.game_id.trim().is_empty() || game.game_id.trim() == "0" {
+            pfx.default_game_id.as_str()
+        } else {
+            game.game_id.as_str()
+        };
+        let has_autofix = find_protonfix_for_game_id(eff_gid, &app.installed_protons).is_some();
+        let pdb_summary = extract_steam_appid(eff_gid)
+            .and_then(|aid| app.protondb_cache.get(&aid).cloned());
+        let g_exe_for_scan = game.exe_path.clone();
+        let app_for_scan = app_entity.clone();
 
         h_flex()
             .w_full()
@@ -310,6 +321,33 @@ pub fn render_prefix_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                                     })
                                     .when(has_custom_icon, |this| {
                                         this.child(tag_pill("Custom Icon", hex_color(kd::BLUE)))
+                                    })
+                                    .when(has_autofix, |this| {
+                                        this.child(tag_pill("Auto-Fix", hex_color(kd::GREEN)))
+                                    })
+                                    .when_some(pdb_summary, |this, pdb| {
+                                        let aid = pdb.app_id;
+                                        let col = lookup_modals::protondb_tier_color(&pdb.tier);
+                                        let label = format!(
+                                            "PDB: {}",
+                                            lookup_modals::protondb_tier_title(&pdb.tier)
+                                        );
+                                        this.child(
+                                            div()
+                                                .id(SharedString::from(format!("game-pdb-{g_ix}")))
+                                                .px_1p5()
+                                                .py_0p5()
+                                                .rounded(px(4.))
+                                                .bg(hex_color(kd::BG_SIDEBAR))
+                                                .text_size(px(10.))
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(col)
+                                                .cursor_pointer()
+                                                .on_click(move |_, _, _| {
+                                                    let _ = open_url_in_browser(&protondb_url(aid));
+                                                })
+                                                .child(label),
+                                        )
                                     })
                                     .when(!game.game_id.is_empty() && game.game_id != "0", |this| {
                                         this.child(
@@ -393,6 +431,23 @@ pub fn render_prefix_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                                 })),
                         )
                     })
+                    .child(
+                        Button::new(SharedString::from(format!("game-scan-{g_ix}")))
+                            .ghost()
+                            .xsmall()
+                            .icon(IconName::FileSearch)
+                            .tooltip("Scan .exe imports for missing DLLs / winetricks & mod overrides")
+                            .on_click(move |_, window, cx| {
+                                lookup_modals::open_dep_scanner_dialog(
+                                    app_for_scan.clone(),
+                                    idx,
+                                    Some(g_ix),
+                                    Some(g_exe_for_scan.clone()),
+                                    window,
+                                    cx,
+                                );
+                            }),
+                    )
                     .child(
                         Button::new(SharedString::from(format!("game-edit-{g_ix}")))
                             .ghost()
@@ -559,6 +614,55 @@ pub fn render_prefix_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                         }),
                 )
                 .child(
+                    Button::new("tool-umu-lookup")
+                        .outline()
+                        .xsmall()
+                        .icon(IconName::Search)
+                        .label("UMU / ProtonDB…")
+                        .tooltip("Search UMU Database (offline + online), inspect bundled protonfixes & ProtonDB ratings")
+                        .on_click({
+                            let app_e = app_entity.clone();
+                            let pfx_name = pfx.name.clone();
+                            move |_, window, cx| {
+                                let app_apply = app_e.clone();
+                                lookup_modals::open_umu_lookup_dialog(
+                                    app_e.clone(),
+                                    pfx_name.clone(),
+                                    format!("Lookup UMU GAMEID for '{pfx_name}'"),
+                                    std::rc::Rc::new(move |gid, window, cx| {
+                                        app_apply.update(cx, |app, cx| {
+                                            app.set_prefix_game_id(idx, gid, window, cx);
+                                        });
+                                    }),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }),
+                )
+                .child(
+                    Button::new("tool-autofix-presets")
+                        .outline()
+                        .xsmall()
+                        .icon(IconName::BadgeCheck)
+                        .label("Auto-Fix & Presets…")
+                        .tooltip("Scan .exe PE imports for missing runtime DLLs / mod hooks or apply curated Prefix Presets")
+                        .on_click({
+                            let app_e = app_entity.clone();
+                            let first_exe = pfx.games.first().map(|g| g.exe_path.clone());
+                            move |_, window, cx| {
+                                lookup_modals::open_dep_scanner_dialog(
+                                    app_e.clone(),
+                                    idx,
+                                    None,
+                                    first_exe.clone(),
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }),
+                )
+                .child(
                     Button::new("tool-clear-shader")
                         .outline()
                         .xsmall()
@@ -687,18 +791,87 @@ pub fn render_prefix_view(app: &UmuBoxApp, cx: &mut Context<UmuBoxApp>) -> impl 
                 .child(
                     h_flex()
                         .gap_3()
-                        .child(
+                        .child({
+                            let pfx_fix = find_protonfix_for_game_id(
+                                &pfx.default_game_id,
+                                &app.installed_protons,
+                            );
+                            let pfx_pdb = extract_steam_appid(&pfx.default_game_id)
+                                .and_then(|aid| app.protondb_cache.get(&aid).cloned());
+                            let app_lookup = app_entity.clone();
+                            let pfx_name = pfx.name.clone();
+
                             v_flex()
-                                .w(px(220.))
+                                .w(px(290.))
                                 .gap_1()
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(hex_color(kd::FG_MUTED))
-                                        .child("Default GAMEID"),
+                                    h_flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(hex_color(kd::FG_MUTED))
+                                                .child("Default GAMEID"),
+                                        )
+                                        .child(
+                                            h_flex()
+                                                .gap_1()
+                                                .items_center()
+                                                .when(pfx_fix.is_some(), |r| {
+                                                    r.child(tag_pill("Auto-Fix", hex_color(kd::GREEN)))
+                                                })
+                                                .when_some(pfx_pdb, |r, pdb| {
+                                                    r.child(
+                                                        div()
+                                                            .text_size(px(10.))
+                                                            .font_weight(FontWeight::BOLD)
+                                                            .text_color(
+                                                                lookup_modals::protondb_tier_color(
+                                                                    &pdb.tier,
+                                                                ),
+                                                            )
+                                                            .child(format!(
+                                                                "PDB {}",
+                                                                lookup_modals::protondb_tier_title(
+                                                                    &pdb.tier,
+                                                                )
+                                                            )),
+                                                    )
+                                                }),
+                                        ),
                                 )
-                                .child(Input::new(&app.default_game_id_input)),
-                        )
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .child(div().flex_1().child(Input::new(&app.default_game_id_input)))
+                                        .child(
+                                            Button::new("pfx-gid-lookup")
+                                                .outline()
+                                                .small()
+                                                .icon(IconName::Search)
+                                                .tooltip("Lookup in UMU Database")
+                                                .on_click(move |_, window, cx| {
+                                                    let app_apply = app_lookup.clone();
+                                                    lookup_modals::open_umu_lookup_dialog(
+                                                        app_lookup.clone(),
+                                                        pfx_name.clone(),
+                                                        "Lookup Prefix UMU GAMEID".to_string(),
+                                                        std::rc::Rc::new(move |gid, window, cx| {
+                                                            app_apply.update(cx, |app, cx| {
+                                                                app.set_prefix_game_id(
+                                                                    idx, gid, window, cx,
+                                                                );
+                                                            });
+                                                        }),
+                                                        window,
+                                                        cx,
+                                                    );
+                                                }),
+                                        ),
+                                )
+                        })
                         .child(
                             v_flex()
                                 .flex_1()
